@@ -9,6 +9,7 @@ from playwright.async_api import async_playwright
 
 from .config import Settings
 from .dedupe import mark_discovery_duplicates
+from .geography import is_european_location
 from .http_utils import normalize_url, registrable_domain
 from .models import AgencyRecord, Status
 from .storage import read_records, write_records_atomic
@@ -64,6 +65,8 @@ async def resolve_outbound(url: str, client: httpx.AsyncClient) -> str:
 
 async def discover_agencies(urls: list[str], settings: Settings, output_path) -> list[AgencyRecord]:
     records = read_records(output_path)
+    if settings.europe_only:
+        records = [record for record in records if is_european_location(record.country)]
     for index, record in enumerate(records):
         record.source_order = index
     domains_present_before_run = {record.domain for record in records if record.domain}
@@ -79,6 +82,8 @@ async def discover_agencies(urls: list[str], settings: Settings, output_path) ->
                 while current and page_count < settings.max_directory_pages and len(records) < settings.max_agencies:
                     await page.goto(current, wait_until="domcontentloaded", timeout=settings.timeout_seconds * 1000)
                     found, next_url = parse_clutch_html(await page.content(), current, len(records))
+                    if settings.europe_only:
+                        found = [record for record in found if is_european_location(record.country)]
                     for record in found[: settings.max_agencies - len(records)]:
                         record.website = await resolve_outbound(record.website, client)
                         record.domain = registrable_domain(record.website)

@@ -36,13 +36,17 @@ cp config.example.yaml config.yaml
 ```bash
 agency-lead-pipeline discover https://clutch.co/web-developers
 agency-lead-pipeline discover examples/clutch_urls.txt --max-pages 3 --max-agencies 100
+agency-lead-pipeline discover examples/clutch_urls.txt --europe-only
 agency-lead-pipeline extract
+agency-lead-pipeline extract --europe-only
 agency-lead-pipeline run examples/clutch_urls.txt --config config.example.yaml
 agency-lead-pipeline dedupe data/leads.csv --output data/leads_clean.csv
 agency-lead-pipeline validate data/leads.csv
 ```
 
 `discover` defaults to `data/raw_agencies.csv`; `extract` defaults to reading that file and writing `data/leads.csv`. CLI values override YAML settings. The pipeline never follows an off-domain website link, except for the initial Clutch outbound redirect chain.
+
+Set `europe_only: true` in YAML or pass `--europe-only` to keep only agencies whose Clutch location ends in a recognized European country. The filter runs during both discovery and extraction. Missing or unrecognized locations are excluded; `--all-regions` disables a YAML-configured filter.
 
 ## CSV schema
 
@@ -74,4 +78,3 @@ Use this project only for lawful collection of public business contact details. 
 - Optional persisted email-candidate diagnostics and multi-email CSV output.
 - Robots-policy checking and richer retry/backoff controls.
 - Additional public agency directories through separate adapters.
-

@@ -11,4 +11,4 @@ build/
 *.egg-info/
 data/*.csv
 playwright-report/
-
+config.yaml

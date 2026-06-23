@@ -15,6 +15,7 @@ class Settings(BaseModel):
     max_pages_per_website: int = Field(default=5, ge=1)
     timeout_seconds: float = Field(default=20, gt=0)
     concurrency: int = Field(default=2, ge=1, le=10)
+    europe_only: bool = False
     user_agent: str = "agency-lead-pipeline/0.1 (+https://github.com/)"
     raw_output: Path = Path("data/raw_agencies.csv")
     leads_output: Path = Path("data/leads.csv")
@@ -30,4 +31,3 @@ def load_settings(path: Path | None = None, **overrides: Any) -> Settings:
         data.update(loaded)
     data.update({key: value for key, value in overrides.items() if value is not None})
     return Settings.model_validate(data)
-

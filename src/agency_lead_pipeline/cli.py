@@ -13,6 +13,7 @@ from .clutch import discover_agencies
 from .config import Settings, load_settings
 from .contacts import extract_record
 from .dedupe import dedupe_records
+from .geography import is_european_location
 from .logging_utils import console
 from .models import FINALIZED_STATUSES, Status
 from .storage import read_records, validate_csv, write_records_atomic
@@ -49,9 +50,11 @@ def discover(
     delay: Annotated[float | None, typer.Option()] = None,
     timeout: Annotated[float | None, typer.Option()] = None,
     user_agent: Annotated[str | None, typer.Option()] = None,
+    europe_only: Annotated[bool | None, typer.Option("--europe-only/--all-regions")] = None,
 ) -> None:
     settings = _settings(config, raw_output=output, max_directory_pages=max_pages, max_agencies=max_agencies,
-                         delay_seconds=delay, timeout_seconds=timeout, user_agent=user_agent)
+                         delay_seconds=delay, timeout_seconds=timeout, user_agent=user_agent,
+                         europe_only=europe_only)
     expanded = _expand_urls(urls) or settings.clutch_urls
     if not expanded:
         raise typer.BadParameter("Provide at least one Clutch directory URL")
@@ -62,6 +65,10 @@ def discover(
 async def _extract_all(settings: Settings, input_path: Path, output_path: Path) -> tuple[int, int]:
     source = dedupe_records([record for record in read_records(input_path) if record.status != Status.DUPLICATE])
     existing = read_records(output_path)
+    if settings.europe_only:
+        source = [record for record in source if is_european_location(record.country)]
+        existing = [record for record in existing if is_european_location(record.country)]
+        write_records_atomic(output_path, existing)
     finalized = {record.domain for record in existing if record.domain and record.status in FINALIZED_STATUSES}
     results = list(existing)
     pending = [record for record in source if record.domain not in finalized]
@@ -98,9 +105,11 @@ def extract_command(
     concurrency: Annotated[int | None, typer.Option()] = None,
     delay: Annotated[float | None, typer.Option()] = None,
     timeout: Annotated[float | None, typer.Option()] = None,
+    europe_only: Annotated[bool | None, typer.Option("--europe-only/--all-regions")] = None,
 ) -> None:
     settings = _settings(config, leads_output=output, max_pages_per_website=max_site_pages,
-                         concurrency=concurrency, delay_seconds=delay, timeout_seconds=timeout)
+                         concurrency=concurrency, delay_seconds=delay, timeout_seconds=timeout,
+                         europe_only=europe_only)
     input_path = input or settings.raw_output
     processed, skipped = asyncio.run(_extract_all(settings, input_path, settings.leads_output))
     console.print(f"[green]Processed {processed}; skipped {skipped} finalized domain(s) → {settings.leads_output}[/green]")
@@ -110,8 +119,9 @@ def extract_command(
 def run(
     urls: Annotated[list[str], typer.Argument()],
     config: Annotated[Path | None, typer.Option()] = None,
+    europe_only: Annotated[bool | None, typer.Option("--europe-only/--all-regions")] = None,
 ) -> None:
-    settings = _settings(config)
+    settings = _settings(config, europe_only=europe_only)
     expanded = _expand_urls(urls) or settings.clutch_urls
     asyncio.run(discover_agencies(expanded, settings, settings.raw_output))
     processed, skipped = asyncio.run(_extract_all(settings, settings.raw_output, settings.leads_output))
