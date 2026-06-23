@@ -1,0 +1,13 @@
+clutch_urls:
+  - https://clutch.co/web-developers
+delay_seconds: 1.5
+max_directory_pages: 10
+max_agencies: 500
+max_pages_per_website: 5
+timeout_seconds: 20
+concurrency: 2
+user_agent: "agency-lead-pipeline/0.1 (+https://github.com/your-name/agency-lead-pipeline)"
+raw_output: data/raw_agencies.csv
+leads_output: data/leads.csv
+headless: true
+
