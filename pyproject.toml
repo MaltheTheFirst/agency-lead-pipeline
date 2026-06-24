@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agency-lead-pipeline"
 version = "0.1.0"
-description = "Reusable Clutch agency discovery and public contact email extraction pipeline"
+description = "Reusable directory discovery and public contact email extraction pipeline"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -32,4 +32,3 @@ packages = ["src/agency_lead_pipeline"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-

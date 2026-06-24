@@ -15,15 +15,28 @@ COMMON_PATHS = ("/contact", "/contact-us", "/about", "/about-us", "/impressum", 
 CONTACT_TERMS = ("contact", "about", "impressum", "legal", "privacy", "team")
 
 
-def parse_contact_html(html: str, page_url: str, agency_domain: str) -> tuple[list[EmailCandidate], list[str]]:
+def parse_contact_html(
+    html: str,
+    page_url: str,
+    agency_domain: str,
+    allow_personal_emails: bool = False,
+) -> tuple[list[EmailCandidate], list[str]]:
     soup = BeautifulSoup(html, "html.parser")
     candidates: list[EmailCandidate] = []
     for anchor in soup.select('a[href^="mailto:"]'):
         value = anchor.get("href", "").split(":", 1)[-1].split("?", 1)[0]
-        candidates.extend(candidates_from_text(value, page_url, "mailto", agency_domain))
-    candidates.extend(candidates_from_text(soup.get_text(" ", strip=True), page_url, "visible_text", agency_domain))
+        candidates.extend(candidates_from_text(
+            value, page_url, "mailto", agency_domain, allow_personal_emails
+        ))
+    candidates.extend(candidates_from_text(
+        soup.get_text(" ", strip=True), page_url, "visible_text", agency_domain,
+        allow_personal_emails,
+    ))
     for node in soup.select('script[type="application/ld+json"]'):
-        candidates.extend(candidates_from_text(node.get_text(" "), page_url, "json_ld", agency_domain))
+        candidates.extend(candidates_from_text(
+            node.get_text(" "), page_url, "json_ld", agency_domain,
+            allow_personal_emails,
+        ))
     links: list[str] = []
     for anchor in soup.select("a[href]"):
         href = normalize_url(str(anchor.get("href", "")), page_url)
@@ -91,7 +104,9 @@ async def extract_record(record: AgencyRecord, client: httpx.AsyncClient, browse
             except Exception:
                 unreachable_count += 1
         if html:
-            found, links = parse_contact_html(html, url, domain)
+            found, links = parse_contact_html(
+                html, url, domain, settings.allow_personal_emails
+            )
             all_candidates.extend(found)
             queue.extend(link for link in links if link not in visited)
         if settings.delay_seconds:

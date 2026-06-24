@@ -16,6 +16,7 @@ class Settings(BaseModel):
     timeout_seconds: float = Field(default=20, gt=0)
     concurrency: int = Field(default=2, ge=1, le=10)
     europe_only: bool = False
+    allow_personal_emails: bool = False
     user_agent: str = "agency-lead-pipeline/0.1 (+https://github.com/)"
     raw_output: Path = Path("data/raw_agencies.csv")
     leads_output: Path = Path("data/leads.csv")

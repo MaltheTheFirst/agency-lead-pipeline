@@ -19,7 +19,10 @@ from .models import FINALIZED_STATUSES, Status
 from .storage import read_records, validate_csv, write_records_atomic
 
 
-app = typer.Typer(help="Discover Clutch agencies and extract public contact emails.", no_args_is_help=True)
+app = typer.Typer(
+    help="Discover directory listings and extract publicly available contact emails.",
+    no_args_is_help=True,
+)
 
 
 def _expand_urls(values: list[str]) -> list[str]:

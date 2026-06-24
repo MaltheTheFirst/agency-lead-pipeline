@@ -8,6 +8,14 @@ from pathlib import Path
 from .models import AgencyRecord, CSV_COLUMNS
 
 
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def protect_csv_field(value: str) -> str:
+    """Prevent spreadsheet applications from interpreting exported data as formulas."""
+    return f"'{value}" if value.startswith(FORMULA_PREFIXES) else value
+
+
 def read_records(path: Path) -> list[AgencyRecord]:
     if not path.exists():
         return []
@@ -25,7 +33,10 @@ def write_records_atomic(path: Path, records: list[AgencyRecord]) -> None:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS)
             writer.writeheader()
-            writer.writerows(record.to_csv_row() for record in records)
+            writer.writerows(
+                {column: protect_csv_field(value) for column, value in record.to_csv_row().items()}
+                for record in records
+            )
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
@@ -56,4 +67,3 @@ def validate_csv(path: Path) -> list[str]:
         if record.email and not is_valid_email(record.email):
             errors.append(f"row {row_number}: malformed or filtered Email")
     return errors
-

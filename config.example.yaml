@@ -11,4 +11,4 @@ raw_output: data/raw_agencies.csv
 leads_output: data/leads.csv
 headless: true
 europe_only: true
-
+allow_personal_emails: false
