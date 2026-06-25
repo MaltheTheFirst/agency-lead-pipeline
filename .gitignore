@@ -10,5 +10,6 @@ dist/
 build/
 *.egg-info/
 data/*.csv
+archive/*.csv
 playwright-report/
 config.yaml

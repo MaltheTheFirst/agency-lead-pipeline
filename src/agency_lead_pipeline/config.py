@@ -4,10 +4,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Settings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     clutch_urls: list[str] = Field(default_factory=list)
     delay_seconds: float = Field(default=1.5, ge=0)
     max_directory_pages: int = Field(default=10, ge=1)
@@ -20,6 +22,7 @@ class Settings(BaseModel):
     user_agent: str = "agency-lead-pipeline/0.1 (+https://github.com/)"
     raw_output: Path = Path("data/raw_agencies.csv")
     leads_output: Path = Path("data/leads.csv")
+    archive_directory: Path = Path("archive")
     headless: bool = True
 
 

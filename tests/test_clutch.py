@@ -1,4 +1,11 @@
-from agency_lead_pipeline.clutch import parse_clutch_html
+import pytest
+
+from agency_lead_pipeline.clutch import (
+    DirectoryAccessError,
+    directory_page_url,
+    load_directory_html,
+    parse_clutch_html,
+)
 
 
 def test_parse_clutch_listing_and_next_page():
@@ -18,3 +25,26 @@ def test_parse_clutch_listing_and_next_page():
     assert records[0].website.startswith("https://northstar.example")
     assert next_url == "https://clutch.co/web-developers?page=2"
 
+
+def test_directory_page_fallback_preserves_filters_and_replaces_page():
+    assert directory_page_url(
+        "https://clutch.co/web-developers?sort_by=0&page=3", 4
+    ) == "https://clutch.co/web-developers?sort_by=0&page=4"
+
+
+class ChallengePage:
+    async def goto(self, *args, **kwargs):
+        return None
+
+    async def wait_for_selector(self, *args, **kwargs):
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+        raise PlaywrightTimeoutError("timed out")
+
+    async def content(self):
+        return "<div>Enable JavaScript and cookies to continue</div><script src='challenge-platform'></script>"
+
+
+@pytest.mark.asyncio
+async def test_directory_access_challenge_fails_loudly():
+    with pytest.raises(DirectoryAccessError, match="access challenge"):
+        await load_directory_html(ChallengePage(), "https://directory.example", 1)

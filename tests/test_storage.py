@@ -3,7 +3,7 @@ import csv
 import pytest
 
 from agency_lead_pipeline.models import AgencyRecord, CSV_COLUMNS
-from agency_lead_pipeline.storage import read_records, write_records_atomic
+from agency_lead_pipeline.storage import read_archived_domains, read_records, write_records_atomic
 
 
 def test_atomic_csv_round_trip(tmp_path):
@@ -55,3 +55,24 @@ def test_legitimate_apostrophe_prefixed_value_is_unchanged(tmp_path):
     path = tmp_path / "leads.csv"
     write_records_atomic(path, [AgencyRecord(agency="'+44 20 1234 5678")])
     assert read_records(path)[0].agency == "'+44 20 1234 5678"
+
+
+def test_archive_reader_supports_legacy_schema_and_ignores_other_fields(tmp_path):
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "leads.csv").write_text(
+        "Agency,Website,Status,Critical_Findings\n"
+        "Old Agency,www.example.co.uk,Contacted,ignored\n",
+        encoding="utf-8",
+    )
+    assert read_archived_domains(archive) == {"example.co.uk"}
+
+
+def test_archive_reader_supports_domain_column_and_multiple_files(tmp_path):
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "one.csv").write_text("Domain\nagency.com\n", encoding="utf-8")
+    (archive / "two.csv").write_text(
+        "Website\nhttps://www.studio.dev/contact\n", encoding="utf-8"
+    )
+    assert read_archived_domains(archive) == {"agency.com", "studio.dev"}

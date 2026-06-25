@@ -9,20 +9,28 @@ import typer
 from playwright.async_api import async_playwright
 from rich.progress import Progress
 
-from .clutch import discover_agencies
+from .clutch import DirectoryAccessError, discover_agencies
 from .config import Settings, load_settings
 from .contacts import extract_record
 from .dedupe import dedupe_records
 from .geography import is_european_location
 from .logging_utils import console
 from .models import FINALIZED_STATUSES, Status
-from .storage import read_records, validate_csv, write_records_atomic
+from .storage import read_archived_domains, read_records, validate_csv, write_records_atomic
 
 
 app = typer.Typer(
     help="Discover directory listings and extract publicly available contact emails.",
     no_args_is_help=True,
 )
+
+
+def _print_directory_error(exc: DirectoryAccessError) -> None:
+    console.print(f"[red]Discovery stopped:[/red] {exc}")
+    console.print(
+        "[yellow]Previously saved CSV checkpoints were left unchanged. "
+        "No extraction was started.[/yellow]"
+    )
 
 
 def _expand_urls(values: list[str]) -> list[str]:
@@ -38,7 +46,10 @@ def _expand_urls(values: list[str]) -> list[str]:
 
 def _settings(config: Path | None, **values) -> Settings:
     try:
-        return load_settings(config, **values)
+        # A project-local config.yaml is the conventional default. An explicit
+        # --config path still takes precedence, and CLI values override both.
+        config_path = config or (Path("config.yaml") if Path("config.yaml").is_file() else None)
+        return load_settings(config_path, **values)
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -61,20 +72,31 @@ def discover(
     expanded = _expand_urls(urls) or settings.clutch_urls
     if not expanded:
         raise typer.BadParameter("Provide at least one Clutch directory URL")
-    records = asyncio.run(discover_agencies(expanded, settings, settings.raw_output))
+    try:
+        records = asyncio.run(discover_agencies(expanded, settings, settings.raw_output))
+    except DirectoryAccessError as exc:
+        _print_directory_error(exc)
+        raise typer.Exit(2) from None
     console.print(f"[green]Discovered {len(records)} rows → {settings.raw_output}[/green]")
 
 
 async def _extract_all(settings: Settings, input_path: Path, output_path: Path) -> tuple[int, int]:
+    archived_domains = read_archived_domains(settings.archive_directory)
     source = dedupe_records([record for record in read_records(input_path) if record.status != Status.DUPLICATE])
     existing = read_records(output_path)
+    archived_skipped = sum(bool(record.domain and record.domain in archived_domains) for record in source)
+    source = [record for record in source if record.domain not in archived_domains]
+    existing = [record for record in existing if record.domain not in archived_domains]
     if settings.europe_only:
         source = [record for record in source if is_european_location(record.country)]
         existing = [record for record in existing if is_european_location(record.country)]
-        write_records_atomic(output_path, existing)
-    finalized = {record.domain for record in existing if record.domain and record.status in FINALIZED_STATUSES}
+    write_records_atomic(output_path, existing)
+    finalized = archived_domains | {
+        record.domain for record in existing if record.domain and record.status in FINALIZED_STATUSES
+    }
     results = list(existing)
     pending = [record for record in source if record.domain not in finalized]
+    skipped = archived_skipped + sum(bool(record.domain and record.domain in finalized) for record in source)
     headers = {"User-Agent": settings.user_agent}
     timeout = httpx.Timeout(settings.timeout_seconds)
     semaphore = asyncio.Semaphore(settings.concurrency)
@@ -96,7 +118,7 @@ async def _extract_all(settings: Settings, input_path: Path, output_path: Path) 
                     progress.advance(task)
         finally:
             await browser.close()
-    return len(pending), len(finalized)
+    return len(pending), skipped
 
 
 @app.command("extract")
@@ -126,7 +148,11 @@ def run(
 ) -> None:
     settings = _settings(config, europe_only=europe_only)
     expanded = _expand_urls(urls) or settings.clutch_urls
-    asyncio.run(discover_agencies(expanded, settings, settings.raw_output))
+    try:
+        asyncio.run(discover_agencies(expanded, settings, settings.raw_output))
+    except DirectoryAccessError as exc:
+        _print_directory_error(exc)
+        raise typer.Exit(2) from None
     processed, skipped = asyncio.run(_extract_all(settings, settings.raw_output, settings.leads_output))
     console.print(f"[green]Run complete: {processed} processed, {skipped} resumed → {settings.leads_output}[/green]")
 

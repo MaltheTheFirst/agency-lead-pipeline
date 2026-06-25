@@ -34,6 +34,8 @@ Copy and edit the example configuration if desired:
 cp config.example.yaml config.yaml
 ```
 
+Commands automatically load `config.yaml` from the current directory when it exists. Use `--config PATH` to select another file; explicit CLI options override configuration values.
+
 ## Commands
 
 The current `discover` and `run` commands use the bundled Clutch adapter:
@@ -51,7 +53,11 @@ agency-lead-pipeline validate data/leads.csv
 
 `discover` defaults to `data/raw_agencies.csv`; `extract` defaults to reading that file and writing `data/leads.csv`. CLI values override YAML settings. The pipeline never follows an off-domain website link, except for the initial directory adapter's outbound redirect chain.
 
+Historical CSV files placed directly in `archive/` are a read-only suppression list. The pipeline reads only their `Domain` or `Website` column, normalizes registrable domains, and excludes matches from new discovery and extraction output regardless of archived status. All other legacy columns are ignored, and archived rows are never copied into current output. Set `archive_directory` to select a different folder.
+
 Set `europe_only: true` in YAML or pass `--europe-only` to keep only agencies whose directory location ends in a recognized European country. The filter runs during both discovery and extraction. Missing or unrecognized locations are excluded; `--all-regions` disables a YAML-configured filter.
+
+`max_directory_pages` limits directory result pages per URL. `max_pages_per_website` separately limits contact pages visited on each organization website. `max_agencies` limits newly accepted discovery rows per run; existing raw rows do not consume that allowance.
 
 ### Privacy-conscious email selection
 
@@ -109,6 +115,7 @@ Requirements depend on the operator's purpose, location, sources, retained data,
 
 - **Chromium missing:** run `playwright install chromium` in the active environment.
 - **The Clutch adapter returns no rows:** page markup may have changed; inspect the listing selectors in `clutch.py` and open an issue with sanitized HTML details.
+- **Directory access challenge:** set `headless: false`, rerun from an interactive terminal, and complete any check shown in the browser. The pipeline waits for listings but does not bypass CAPTCHAs or access controls.
 - **Timeouts:** increase `timeout_seconds`, lower concurrency, or reduce per-run limits.
 - **No email:** the site may publish no eligible address, require unsupported interaction, or place it beyond the page limit.
 - **Resume behavior surprises:** remove or edit finalized rows in `data/leads.csv` to intentionally retry them.

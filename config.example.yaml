@@ -9,6 +9,7 @@ concurrency: 2
 user_agent: "agency-lead-pipeline/0.1 (+https://github.com/your-name/agency-lead-pipeline)"
 raw_output: data/raw_agencies.csv
 leads_output: data/leads.csv
+archive_directory: archive
 headless: true
 europe_only: true
 allow_personal_emails: false

@@ -11,6 +11,29 @@ from .models import AgencyRecord, CSV_COLUMNS
 FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
+def read_archived_domains(directory: Path) -> set[str]:
+    """Read only domain identifiers from historical CSVs, regardless of schema."""
+    from .http_utils import registrable_domain
+
+    domains: set[str] = set()
+    if not directory.is_dir():
+        return domains
+    for path in sorted(directory.glob("*.csv")):
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle)
+            headers = {name.strip().lower(): name for name in (reader.fieldnames or []) if name}
+            domain_field = headers.get("domain")
+            website_field = headers.get("website")
+            if not domain_field and not website_field:
+                continue
+            for row in reader:
+                value = (row.get(domain_field or "", "") or row.get(website_field or "", "")).strip()
+                domain = registrable_domain(value[1:] if value.startswith("'") else value)
+                if domain:
+                    domains.add(domain)
+    return domains
+
+
 def protect_csv_field(value: str) -> str:
     """Prevent spreadsheet applications from interpreting exported data as formulas."""
     return f"'{value}" if value.startswith(FORMULA_PREFIXES) else value
