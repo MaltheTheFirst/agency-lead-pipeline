@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -14,6 +15,8 @@ from .config import Settings, load_settings
 from .contacts import extract_record
 from .dedupe import dedupe_records
 from .geography import is_european_location
+from .generic_directory import discover_generic_websites
+from .http_utils import homepage_url
 from .logging_utils import console
 from .models import FINALIZED_STATUSES, Status
 from .storage import read_archived_domains, read_records, validate_csv, write_records_atomic
@@ -54,6 +57,40 @@ def _settings(config: Path | None, **values) -> Settings:
         raise typer.BadParameter(str(exc)) from exc
 
 
+def _log_line(path: Path | None, message: str) -> None:
+    if not path:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"{timestamp} {message}\n")
+
+
+def _valid_email_leads(records) -> list:
+    return [
+        record for record in dedupe_records(records)
+        if record.status == Status.EMAIL_FOUND and record.email
+    ]
+
+
+def _write_valid_email_leads(
+    path: Path,
+    records,
+    limit: int | None = None,
+    homepage_websites: bool = True,
+) -> int:
+    leads = _valid_email_leads(records)
+    if limit is not None:
+        leads = leads[:limit]
+    if homepage_websites:
+        leads = [
+            record.model_copy(update={"website": homepage_url(record.website)})
+            for record in leads
+        ]
+    write_records_atomic(path, leads)
+    return len(leads)
+
+
 @app.command()
 def discover(
     urls: Annotated[list[str], typer.Argument(help="Clutch URL(s), or newline-delimited URL file(s).")],
@@ -80,7 +117,47 @@ def discover(
     console.print(f"[green]Discovered {len(records)} rows → {settings.raw_output}[/green]")
 
 
-async def _extract_all(settings: Settings, input_path: Path, output_path: Path) -> tuple[int, int]:
+@app.command("discover-websites")
+def discover_websites(
+    urls: Annotated[list[str], typer.Argument(help="Directory page URL(s), or newline-delimited URL file(s).")],
+    config: Annotated[Path | None, typer.Option()] = None,
+    output: Annotated[Path | None, typer.Option()] = None,
+    log_file: Annotated[Path | None, typer.Option()] = None,
+    max_pages: Annotated[int | None, typer.Option()] = None,
+    max_sites: Annotated[int | None, typer.Option()] = None,
+    delay: Annotated[float | None, typer.Option()] = None,
+    timeout: Annotated[float | None, typer.Option()] = None,
+    user_agent: Annotated[str | None, typer.Option()] = None,
+    europe_only: Annotated[bool | None, typer.Option("--europe-only/--all-regions")] = None,
+) -> None:
+    settings = _settings(
+        config,
+        raw_output=output,
+        log_file=log_file,
+        max_directory_pages=max_pages,
+        max_agencies=max_sites,
+        delay_seconds=delay,
+        timeout_seconds=timeout,
+        user_agent=user_agent,
+        europe_only=europe_only,
+    )
+    expanded = _expand_urls(urls)
+    if not expanded:
+        raise typer.BadParameter("Provide at least one directory page URL")
+    _log_line(settings.log_file, f"DISCOVER_WEBSITES start urls={len(expanded)} output={settings.raw_output}")
+    records = asyncio.run(
+        discover_generic_websites(expanded, settings, settings.raw_output, max_sites, settings.max_directory_pages)
+    )
+    _log_line(settings.log_file, f"DISCOVER_WEBSITES done rows={len(records)} output={settings.raw_output}")
+    console.print(f"[green]Discovered {len(records)} website row(s) -> {settings.raw_output}[/green]")
+
+
+async def _extract_all(
+    settings: Settings,
+    input_path: Path,
+    output_path: Path,
+    target_email_leads: int | None = None,
+) -> tuple[int, int, int]:
     archived_domains = read_archived_domains(settings.archive_directory)
     source = dedupe_records([record for record in read_records(input_path) if record.status != Status.DUPLICATE])
     existing = read_records(output_path)
@@ -97,6 +174,7 @@ async def _extract_all(settings: Settings, input_path: Path, output_path: Path) 
     results = list(existing)
     pending = [record for record in source if record.domain not in finalized]
     skipped = archived_skipped + sum(bool(record.domain and record.domain in finalized) for record in source)
+    processed = 0
     headers = {"User-Agent": settings.user_agent}
     timeout = httpx.Timeout(settings.timeout_seconds)
     semaphore = asyncio.Semaphore(settings.concurrency)
@@ -104,27 +182,43 @@ async def _extract_all(settings: Settings, input_path: Path, output_path: Path) 
         browser = await playwright.chromium.launch(headless=settings.headless)
         async def process(record):
             async with semaphore:
-                return await extract_record(record, client, browser, settings)
+                _log_line(settings.log_file, f"EXTRACT start domain={record.domain} website={record.website}")
+                extraction = await extract_record(record, client, browser, settings)
+                completed = extraction.record
+                _log_line(
+                    settings.log_file,
+                    f"EXTRACT done status={completed.status.value} domain={completed.domain} email={completed.email or '-'} notes={completed.notes!r}",
+                )
+                return extraction
         try:
             with Progress(console=console) as progress:
                 task = progress.add_task("Extracting", total=len(pending))
-                jobs = [asyncio.create_task(process(record)) for record in pending]
-                for job in asyncio.as_completed(jobs):
-                    extraction = await job
-                    completed = extraction.record
-                    results = [row for row in results if not completed.domain or row.domain != completed.domain]
-                    results.append(completed)
-                    write_records_atomic(output_path, dedupe_records(results))
-                    progress.advance(task)
+                for index in range(0, len(pending), settings.concurrency):
+                    if target_email_leads and len(_valid_email_leads(results)) >= target_email_leads:
+                        break
+                    batch = pending[index:index + settings.concurrency]
+                    jobs = [asyncio.create_task(process(record)) for record in batch]
+                    for job in asyncio.as_completed(jobs):
+                        extraction = await job
+                        completed = extraction.record
+                        results = [row for row in results if not completed.domain or row.domain != completed.domain]
+                        results.append(completed)
+                        processed += 1
+                        write_records_atomic(output_path, dedupe_records(results))
+                        progress.advance(task)
         finally:
             await browser.close()
-    return len(pending), skipped
+    return processed, skipped, len(_valid_email_leads(results))
 
 
 @app.command("extract")
 def extract_command(
     input: Annotated[Path | None, typer.Option()] = None,
     output: Annotated[Path | None, typer.Option()] = None,
+    valid_output: Annotated[Path | None, typer.Option()] = None,
+    target_leads: Annotated[int | None, typer.Option()] = None,
+    homepage_websites: Annotated[bool | None, typer.Option("--homepage-websites/--full-websites")] = None,
+    log_file: Annotated[Path | None, typer.Option()] = None,
     config: Annotated[Path | None, typer.Option()] = None,
     max_site_pages: Annotated[int | None, typer.Option()] = None,
     concurrency: Annotated[int | None, typer.Option()] = None,
@@ -132,12 +226,38 @@ def extract_command(
     timeout: Annotated[float | None, typer.Option()] = None,
     europe_only: Annotated[bool | None, typer.Option("--europe-only/--all-regions")] = None,
 ) -> None:
-    settings = _settings(config, leads_output=output, max_pages_per_website=max_site_pages,
+    settings = _settings(config, leads_output=output, valid_leads_output=valid_output,
+                         target_email_leads=target_leads, homepage_websites=homepage_websites,
+                         log_file=log_file,
+                         max_pages_per_website=max_site_pages,
                          concurrency=concurrency, delay_seconds=delay, timeout_seconds=timeout,
                          europe_only=europe_only)
     input_path = input or settings.raw_output
-    processed, skipped = asyncio.run(_extract_all(settings, input_path, settings.leads_output))
-    console.print(f"[green]Processed {processed}; skipped {skipped} finalized domain(s) → {settings.leads_output}[/green]")
+    _log_line(
+        settings.log_file,
+        f"EXTRACT_RUN start input={input_path} output={settings.leads_output} "
+        f"target={settings.target_email_leads or '-'}",
+    )
+    processed, skipped, valid_count = asyncio.run(
+        _extract_all(settings, input_path, settings.leads_output, settings.target_email_leads)
+    )
+    _log_line(
+        settings.log_file,
+        f"EXTRACT_RUN done processed={processed} skipped={skipped} valid={valid_count} output={settings.leads_output}",
+    )
+    console.print(
+        f"[green]Processed {processed}; skipped {skipped} finalized domain(s); "
+        f"{valid_count} valid email lead(s) -> {settings.leads_output}[/green]"
+    )
+    if valid_output or settings.target_email_leads:
+        written = _write_valid_email_leads(
+            settings.valid_leads_output,
+            read_records(settings.leads_output),
+            settings.target_email_leads,
+            settings.homepage_websites,
+        )
+        _log_line(settings.log_file, f"VALID_EXPORT done rows={written} output={settings.valid_leads_output}")
+        console.print(f"[green]Wrote {written} valid email lead(s) -> {settings.valid_leads_output}[/green]")
 
 
 @app.command()
@@ -153,7 +273,7 @@ def run(
     except DirectoryAccessError as exc:
         _print_directory_error(exc)
         raise typer.Exit(2) from None
-    processed, skipped = asyncio.run(_extract_all(settings, settings.raw_output, settings.leads_output))
+    processed, skipped, _valid_count = asyncio.run(_extract_all(settings, settings.raw_output, settings.leads_output))
     console.print(f"[green]Run complete: {processed} processed, {skipped} resumed → {settings.leads_output}[/green]")
 
 

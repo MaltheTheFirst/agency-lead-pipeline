@@ -116,6 +116,7 @@ Requirements depend on the operator's purpose, location, sources, retained data,
 - **Chromium missing:** run `playwright install chromium` in the active environment.
 - **The Clutch adapter returns no rows:** page markup may have changed; inspect the listing selectors in `clutch.py` and open an issue with sanitized HTML details.
 - **Directory access challenge:** set `headless: false`, rerun from an interactive terminal, and complete any check shown in the browser. The pipeline waits for listings but does not bypass CAPTCHAs or access controls.
+- **Challenge clears too slowly:** increase `challenge_wait_seconds` so visible-browser runs have more time for manual checks before discovery stops.
 - **Timeouts:** increase `timeout_seconds`, lower concurrency, or reduce per-run limits.
 - **No email:** the site may publish no eligible address, require unsupported interaction, or place it beyond the page limit.
 - **Resume behavior surprises:** remove or edit finalized rows in `data/leads.csv` to intentionally retry them.

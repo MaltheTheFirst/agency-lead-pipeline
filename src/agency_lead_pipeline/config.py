@@ -22,8 +22,13 @@ class Settings(BaseModel):
     user_agent: str = "agency-lead-pipeline/0.1 (+https://github.com/)"
     raw_output: Path = Path("data/raw_agencies.csv")
     leads_output: Path = Path("data/leads.csv")
+    valid_leads_output: Path = Path("data/leads_valid.csv")
+    target_email_leads: int | None = Field(default=None, ge=1)
+    homepage_websites: bool = True
+    log_file: Path | None = None
     archive_directory: Path = Path("archive")
     headless: bool = True
+    challenge_wait_seconds: float = Field(default=180, gt=0)
 
 
 def load_settings(path: Path | None = None, **overrides: Any) -> Settings:

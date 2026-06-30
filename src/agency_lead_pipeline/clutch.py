@@ -11,6 +11,7 @@ from .config import Settings
 from .dedupe import mark_discovery_duplicates
 from .geography import is_european_location
 from .http_utils import normalize_url, registrable_domain
+from .logging_utils import console
 from .models import AgencyRecord, Status
 from .storage import read_archived_domains, read_records, write_records_atomic
 
@@ -24,7 +25,14 @@ class DirectoryAccessError(RuntimeError):
     """Raised when a directory serves an access challenge instead of listings."""
 
 
-async def load_directory_html(page, url: str, timeout_seconds: float) -> str:
+async def load_directory_html(
+    page,
+    url: str,
+    timeout_seconds: float,
+    *,
+    interactive_challenge: bool = False,
+    challenge_wait_seconds: float = 180,
+) -> str:
     await page.goto(url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
     try:
         await page.wait_for_selector(LISTING_SELECTOR, timeout=timeout_seconds * 1000)
@@ -32,6 +40,26 @@ async def load_directory_html(page, url: str, timeout_seconds: float) -> str:
         html = await page.content()
         challenged = any(marker in html.lower() for marker in CHALLENGE_MARKERS)
         if challenged:
+            if interactive_challenge:
+                console.print(
+                    f"[yellow]Directory access challenge detected at {url}. "
+                    f"Complete it in the browser; waiting up to {challenge_wait_seconds:g} seconds.[/yellow]"
+                )
+                bring_to_front = getattr(page, "bring_to_front", None)
+                if bring_to_front:
+                    await bring_to_front()
+                try:
+                    await page.wait_for_selector(
+                        LISTING_SELECTOR,
+                        timeout=challenge_wait_seconds * 1000,
+                    )
+                    return await page.content()
+                except PlaywrightTimeoutError as retry_exc:
+                    raise DirectoryAccessError(
+                        f"Directory access challenge did not clear at {url} within "
+                        f"{challenge_wait_seconds:g} seconds. Complete any interactive "
+                        "browser check and rerun; the pipeline does not bypass access controls."
+                    ) from retry_exc
             raise DirectoryAccessError(
                 f"Directory access challenge detected at {url}. Retry with headless: false "
                 "and complete any interactive browser check; the pipeline does not bypass "
@@ -115,7 +143,13 @@ async def discover_agencies(urls: list[str], settings: Settings, output_path) ->
                 page_count = 0
                 seen_page_signatures: set[tuple[tuple[str, str, str], ...]] = set()
                 while current and page_count < settings.max_directory_pages and new_records_count < settings.max_agencies:
-                    html = await load_directory_html(page, current, settings.timeout_seconds)
+                    html = await load_directory_html(
+                        page,
+                        current,
+                        settings.timeout_seconds,
+                        interactive_challenge=not settings.headless,
+                        challenge_wait_seconds=settings.challenge_wait_seconds,
+                    )
                     found, next_url = parse_clutch_html(html, current, len(records))
                     signature = tuple((record.agency, record.clutch_profile, record.website) for record in found)
                     if not signature or signature in seen_page_signatures:

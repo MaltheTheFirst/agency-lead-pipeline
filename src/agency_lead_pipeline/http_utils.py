@@ -52,6 +52,14 @@ def registrable_domain(url_or_host: str) -> str:
     return result.top_domain_under_public_suffix or ""
 
 
+def homepage_url(url: str) -> str:
+    normalized = normalize_url(url)
+    if not normalized:
+        return ""
+    parts = urlsplit(normalized)
+    return urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+
+
 def is_same_domain(url: str, root_url: str) -> bool:
     left, right = registrable_domain(url), registrable_domain(root_url)
     return bool(left and right and left == right)

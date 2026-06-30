@@ -3,12 +3,15 @@ from __future__ import annotations
 import csv
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from .models import AgencyRecord, CSV_COLUMNS
 
 
 FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+REPLACE_RETRIES = 10
+REPLACE_RETRY_DELAY_SECONDS = 0.5
 
 
 def read_archived_domains(directory: Path) -> set[str]:
@@ -62,7 +65,17 @@ def write_records_atomic(path: Path, records: list[AgencyRecord]) -> None:
             )
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_name, path)
+        for attempt in range(REPLACE_RETRIES):
+            try:
+                os.replace(temp_name, path)
+                break
+            except PermissionError:
+                if attempt == REPLACE_RETRIES - 1:
+                    raise PermissionError(
+                        f"Could not replace {path}. Close the CSV in Excel, preview panes, "
+                        "or other programs that may be locking it, then rerun."
+                    )
+                time.sleep(REPLACE_RETRY_DELAY_SECONDS)
     except BaseException:
         try:
             os.unlink(temp_name)

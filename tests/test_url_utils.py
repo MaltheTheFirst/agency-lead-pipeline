@@ -1,4 +1,4 @@
-from agency_lead_pipeline.http_utils import is_same_domain, normalize_url, registrable_domain
+from agency_lead_pipeline.http_utils import homepage_url, is_same_domain, normalize_url, registrable_domain
 
 
 def test_normalize_url_removes_www_tracking_fragment_and_slash():
@@ -17,4 +17,8 @@ def test_same_domain_allows_subdomains_not_external():
 def test_rejects_unsupported_or_malformed_urls():
     assert normalize_url("mailto:hello@example.com") == ""
     assert normalize_url("") == ""
+
+
+def test_homepage_url_strips_path_query_and_fragment():
+    assert homepage_url("https://www.example.com/services/web?utm_source=x#top") == "https://example.com"
 
