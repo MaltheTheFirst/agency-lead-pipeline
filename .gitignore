@@ -13,3 +13,4 @@ data/*.csv
 archive/*.csv
 playwright-report/
 config.yaml
+logs/
