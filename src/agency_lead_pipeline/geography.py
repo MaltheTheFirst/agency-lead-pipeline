@@ -27,10 +27,16 @@ def _normalize(value: str) -> str:
 
 
 def is_european_location(location: str) -> bool:
-    """Match the country portion of values such as ``Krakow, Poland``."""
+    """Match European countries in simple or multi-country location values."""
     if not location.strip():
         return False
     normalized = _normalize(location)
-    country = normalized.rsplit(",", 1)[-1].strip()
-    return country in EUROPEAN_COUNTRIES
+    parts = re.split(r"[,;/|]|\band\b", normalized)
+    for part in parts:
+        country = re.sub(r"\s*\+\d+$", "", part).strip()
+        if country in {"uk", "u.k.", "gb", "great britain"}:
+            country = "united kingdom"
+        if country in EUROPEAN_COUNTRIES:
+            return True
+    return False
 
